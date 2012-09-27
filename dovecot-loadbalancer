@@ -1,0 +1,445 @@
+#!/usr/bin/env python
+# -*- mode:python; tab-width:2; c-basic-offset:2; intent-tabs-mode:nil; -*-
+# ex: filetype=python tabstop=2 softtabstop=2 shiftwidth=2 expandtab autoindent smartindent
+
+#
+# Dovecot Load-Balancer
+# Copyright (C) 2012 Cedric Dufour <http://cedric.dufour.name>
+# Author: Cedric Dufour <http://cedric.dufour.name>
+#
+# The Dovecot Load-Balancer is free software:
+# you can redistribute it and/or modify it under the terms of the GNU General
+# Public License as published by the Free Software Foundation, Version 3.
+#
+# The Dovecot Load-Balancer is distributed in the hope
+# that it will be useful, but WITHOUT ANY WARRANTY; without even the implied
+# warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+#
+# See the GNU General Public License for more details.
+#
+
+# Modules
+# ... deb: python-argparse, python-configobj, python-daemon, python-psycopg2
+import argparse
+from configobj import ConfigObj, ConfigObjError, flatten_errors
+import daemon
+from daemon.runner import emit_message, is_pidfile_stale, make_pidlockfile
+from email.mime.text import MIMEText
+import os
+import psycopg2
+import signal
+import socket
+from subprocess import Popen, PIPE
+import sys
+import threading
+import time
+from validate import Validator
+
+# Global objects
+DEBUG = True
+CONFIGSPEC_FILENAME = 'dovecot-loadbalancer.conf.spec'
+
+# Dovecot Load-Balancer class
+class CDovecotLoadBalancer:
+    """
+    Dovecot Load-Balancer
+    """
+
+    #------------------------------------------------------------------------------
+    # CONSTRUCTORS / DESTRUCTOR
+    #------------------------------------------------------------------------------
+
+    def __init__( self ):
+        self.bStop = False
+        self.bInitOK = False
+        self.oArgumentParser = None
+        self.oArguments = None
+        self.oConfigObj = None
+        self.oDatabaseConnection = None
+        self.__initArgumentParser()
+
+
+    def __del__( self ):
+        if self.oDatabaseConnection is not None:
+            self.oDatabaseConnection.close()
+
+
+    def __initArgumentParser( self ):
+        """
+        Creates the arguments parser (and help generator)
+        """
+
+        # Create argument parser
+        self.oArgumentParser = argparse.ArgumentParser( 'Dovecot Load-Balancer' )
+
+        # ... available actions
+        self.oArgumentParser.add_argument( 'action', type=str,
+                                           choices=[ 'list', 'add', 'remove', 'status', 'monitor', 'daemon' ],
+                                           help='Action to carry-out' )
+
+        # ... configuration file
+        self.oArgumentParser.add_argument( '-C', '--config', type=str,
+                                           default='/etc/dovecot/dovecot-loadbalancer.conf',
+                                           metavar='<conf-file>',
+                                           help='Path to configuration file (default:/etc/dovecot/dovecot-loadbalancer.conf)' )
+
+        # ... host
+        self.oArgumentParser.add_argument( '-H', '--host', type=str,
+                                           default='',
+                                           metavar='<hostname>',
+                                           help='Host name or (preferrably) IP address [action=add|remove]' )
+
+        # ... port
+        self.oArgumentParser.add_argument( '-P', '--port', type=int,
+                                           default=143,
+                                           metavar='<port>',
+                                           help='Host TCP port (default:143) [action=add|remove]' )
+
+        # ... PID file
+        self.oArgumentParser.add_argument( '--pid', type=str,
+                                           default='/var/run/dovecot-loadbalancer.pid',
+                                           metavar='<pid-file>',
+                                           help='Path to daemon PID file (default:/var/run/dovecot-loadbalancer.pid)' )
+
+
+    def __initArguments( self, _aArguments = None ):
+        """
+        Parses the command-line arguments; returns a non-zero exit code in case of failure.
+        """
+
+        # Parse arguments
+        if _aArguments is None: _aArguments = sys.argv
+        try:
+            self.oArguments = self.oArgumentParser.parse_args()
+        except Exception, e:
+            self.oArguments = None
+            sys.stderr.write( 'ERROR: Failed to parse arguments; %s\n' % str(e) )
+            return 1
+
+        return 0
+
+        
+    def __initConfigObj( self ):
+        """
+        Loads configuration settings; returns a non-zero exit code in case of failure.
+        """
+
+        # Load configuration settings
+        try:
+            self.oConfigObj = ConfigObj( self.oArguments.config, configspec=CONFIGSPEC_FILENAME, file_error=True )
+        except Exception, e:
+            self.oConfigObj = None
+            sys.stderr.write( 'ERROR: Failed to load configuration from file; %s\n' % str(e) )
+            return 1
+        # ... and validate it
+        __oValidator = Validator()
+        __oValidatorResult = self.oConfigObj.validate( __oValidator )
+        if __oValidatorResult != True:
+            sys.stderr.write( 'ERROR: Invalid configuration data' )
+            for( __lSectionList, __sKey, _ ) in flatten_errors( self.oConfigObj, __oValidatorResult ):
+                if __sKey is not None:
+                    sys.stderr.write( ' > Invalid value/pair (%s:%s)\n' % ( ', '.join( __lSectionList ), __sKey ) )
+                else:
+                    sys.stderr.write( ' > Missing section (%s)\n' % ', '.join( __lSectionList ) )
+            return 1
+
+        return 0
+
+
+    def __initDatabaseConnection( self ):
+        """
+        Opens the database connection; returns a non-zero exit code in case of failure.
+        """
+
+        # Open database connection
+        try:
+            __sDatabaseConnectionString = "host='"+self.oConfigObj['database']['host']+"'"
+            __sDatabaseConnectionString += " port="+str(self.oConfigObj['database']['port'])
+            __sDatabaseConnectionString += " dbname='"+self.oConfigObj['database']['database']+"'"
+            __sDatabaseConnectionString += " user='"+self.oConfigObj['database']['user']+"'"
+            __sDatabaseConnectionString += " password='"+self.oConfigObj['database']['password']+"'"
+            self.oDatabaseConnection = psycopg2.connect( __sDatabaseConnectionString )
+        except Exception, e:
+            self.oDatabaseConnection = None
+            sys.stderr.write( 'ERROR: Failed to open database connection; %s\n' % str(e) )
+            return 1
+        self.oDatabaseConnection.set_isolation_level( 0 )
+
+        return 0
+
+
+    def __checkServer( self, _lServer ):
+        """
+        Checks the status of the given server ( host, port ); returns a non-zero exit code in case of failure.
+        """
+        __bSuccess = False
+
+        # Check server status (by attempting to open a socket connection on its specifing host/port)
+        __lAddress = ( _lServer[0], _lServer[1] )
+        __oClientSocket = None
+        for __i in range( 0, self.oConfigObj['status']['retry']+1 ):
+            try:
+                __oClientSocket = socket.create_connection( __lAddress, self.oConfigObj['status']['timeout'] )
+                __bSuccess = True
+                break
+            except:
+                __oClientSocket = None
+        if __oClientSocket is not None:
+            __oClientSocket.close()
+
+        # DEBUG
+        if DEBUG:
+            if __bSuccess:
+                sys.stderr.write( 'DEBUG: Server is alive; %s\n' % str(__lAddress) )
+            else:
+                sys.stderr.write( 'DEBUG: Failed to create connection to server; %s\n' % str(__lAddress) )
+
+        # Update server status
+        __oDatabaseCursor = self.oDatabaseConnection.cursor()
+        try:
+            __oDatabaseCursor.execute( 'SELECT fn_DLB_Host_status(%s,%s,%s);', ( str(_lServer[0]), str(_lServer[1]), __bSuccess ) )
+        except Exception, e:
+            sys.stderr.write( 'ERROR: Failed to execute database query; %s\n' % str(e) )
+            return 1
+        if int(__oDatabaseCursor.fetchone()[0]) <= 0:
+            sys.stderr.write( 'ERROR: Failed to update server status in database\n' )
+            return 1
+
+        # Send e-mail
+        if __bSuccess != bool(_lServer[2]) and len( self.oConfigObj['email']['recipient'] ) > 0:
+            try:
+                __sSubject = "Server %s is " % str(__lAddress)
+                __sSubject += 'UP' if __bSuccess else 'DOWN'
+                __sMessage = "Time: %s\n" % time.strftime( '%Y-%m-%d %H:%M:%S' )
+                __sMessage += "Message: %s\n" % __sSubject
+                __oMIMEText = MIMEText( __sMessage )
+                __oMIMEText['From'] = self.oConfigObj['email']['sender']
+                __oMIMEText['To'] = self.oConfigObj['email']['recipient']
+                __oMIMEText['Subject'] = self.oConfigObj['email']['prefix']+__sSubject
+                __oPopen = Popen( [ self.oConfigObj['email']['sendmail'], "-t" ], stdin=PIPE )
+                __oPopen.communicate( __oMIMEText.as_string() )
+            except Exception, e:
+                sys.stderr.write( 'ERROR: Failed to send status message (e-mail); %s\n' % str(e) )
+                return 1
+
+        return 0
+
+
+    def __serverList( self ):
+        """
+        Returns the defined servers (hosts/ports) and their status; returns None in case of failure.
+        """
+
+        # Query database
+        __oDatabaseCursor = self.oDatabaseConnection.cursor()
+        try:
+            __oDatabaseCursor.execute( 'SELECT vc_IP, vc_Port, b_Active FROM tb_DLB_Host;' )
+        except Exception, e:
+            sys.stderr.write( 'ERROR: Failed to query database; %s\n' % str(e) )
+            return None
+        __oDatabaseResultset = __oDatabaseCursor.fetchall()
+
+        return __oDatabaseResultset
+
+
+    def _serverList( self ):
+        """
+        Lists the defined servers (hosts/ports) and their status; returns a non-zero exit code in case of failure.
+        """
+
+        # Check initialization
+        if self.bInitOK != True:
+            sys.stderr.write( 'ERROR: Invalid status; missing or failed initialization\n' )
+            return 1
+
+        # Retrieve and display servers host/port/status
+        __oServerList = self.__serverList()
+        if __oServerList is None: return 1
+        for __oServer in __oServerList:
+            sys.stdout.write( '%s:%s %s\n' % __oServer )
+
+        return 0
+
+
+    def _serverAdd( self ):
+        """
+        Adds a new server (host/port); returns a non-zero exit code in case of failure.
+        """
+
+        # Check initialization
+        if self.bInitOK != True:
+            sys.stderr.write( 'ERROR: Invalid status; missing or failed initialization\n' )
+            return 1
+
+        # Check host/port
+        if len( self.oArguments.host ) <= 0:
+            sys.stderr.write( 'ERROR: Missing host name or IP address\n' )
+            return 1
+        if self.oArguments.port < 1 or self.oArguments.port > 65535:
+            sys.stderr.write( 'ERROR: Invalid port (%s)\n' % self.oArguments.port )
+            return 1
+
+        # Add host
+        __oDatabaseCursor = self.oDatabaseConnection.cursor()
+        try:
+            __oDatabaseCursor.execute( "SELECT fn_DLB_Host_add(%s,%s);", ( str(self.oArguments.host), str(self.oArguments.port) ) )
+        except Exception, e:
+            sys.stderr.write( 'ERROR: Failed to execute database query; %s\n' % str(e) )
+            return 1
+        if int(__oDatabaseCursor.fetchone()[0]) <= 0:
+            sys.stderr.write( 'ERROR: Failed to add host/port to database\n' )
+            return 1
+
+        return 0
+
+
+    def _serverRemove( self ):
+        """
+        Removes a server (host/port); returns a non-zero exit code in case of failure.
+        """
+
+        # Check initialization
+        if self.bInitOK != True:
+            sys.stderr.write( 'ERROR: Invalid status; missing or failed initialization\n' )
+            return 1
+
+        # Check host/port
+        if len( self.oArguments.host ) <= 0:
+            sys.stderr.write( 'ERROR: Missing host name or IP address\n' )
+            return 1
+        if self.oArguments.port < 1 or self.oArguments.port > 65535:
+            sys.stderr.write( 'ERROR: Invalid port (%s)\n' % self.oArguments.port )
+            return 1
+
+        # Remove host
+        __oDatabaseCursor = self.oDatabaseConnection.cursor()
+        try:
+            __oDatabaseCursor.execute( "SELECT fn_DLB_Host_remove(%s,%s);", ( str(self.oArguments.host), str(self.oArguments.port) ) )
+        except Exception, e:
+            sys.stderr.write( 'ERROR: Failed to execute database query; %s\n' % str(e) )
+            return 1
+
+        return 0
+
+
+
+    def _serverStatus( self ):
+        """
+        Checks (and updates) the servers status once; returns the exit code.
+        """
+        return self._serverMonitor( True)
+
+
+    def _serverMonitor( self, _bOnce = False ):
+        """
+        Launches the monitoring process; returns the exit code.
+        """
+
+        # Check initialization
+        if self.bInitOK != True:
+            sys.stderr.write( 'ERROR: Invalid status; missing or failed initialization\n' )
+            return 1
+
+        # Retrieve servers list
+        __oServerList = self.__serverList()
+        if __oServerList is None: return 1
+
+        # Check hosts status
+        # NOTE: status check is achieved using parallel threads; the main process counts as 1 thread
+        while not self.bStop:
+            while threading.active_count() > 1:
+                sys.stderr.write( "ERROR: Status-check threads are still active; please adjust your 'repeat' setting\n" )
+                time.sleep( (self.oConfigObj['status']['retry']+1) * self.oConfigObj['status']['timeout'] )
+            for __oServer in __oServerList:
+                while threading.active_count() > self.oConfigObj['status']['threads']:
+                    time.sleep( 0.1 )
+                __oThread = threading.Thread( target=self.__checkServer, args=[ __oServer ] )
+                __oThread.start()
+            if _bOnce: break
+            time.sleep( self.oConfigObj['status']['repeat'] )
+
+        return 0
+
+
+    def _daemon( self ):
+        """
+        Daemonizes the monitoring process; returns a non-zero exit code in case of failure.
+        """
+
+        # Daemonize
+        try:
+            # Create and check PID file
+            __oPidLockFile = make_pidlockfile( self.oArguments.pid, 0 )
+            if is_pidfile_stale( __oPidLockFile ):
+                __oPidLockFile.break_lock()
+            if __oPidLockFile.is_locked():
+                sys.stderr.write( 'ERROR: Monitoring process is already running; PID=%s\n' % __oPidLockFile.read_pid() )
+                return 1
+
+            # Create daemon context
+            __oDaemonContext = daemon.DaemonContext( pidfile=__oPidLockFile, stderr=sys.stderr )
+            __oDaemonContext.signal_map = { signal.SIGTERM: self.stop }
+            __oDaemonContext.open()
+            emit_message( '[%s]' % os.getpid() )
+
+            # Initialize
+            # NOTE: daemonization requires that database connections be open *after* opening the daemon context
+            # ... database connection
+            __iReturn = self.__initDatabaseConnection()
+            if __iReturn: return __iReturn
+
+            # Execute
+            self.bInitOK = True
+            return self._serverMonitor()
+        except Exception, e:
+            sys.stderr.write( 'ERROR: Failed to daemonize the monitoring process; %s\n' % str(e) )
+            return 1
+
+    
+    def run( self ):
+        """
+        Executes the requested action; returns a non-zero exit code in case of failure.
+        """
+
+        # Initialize
+        # ... arguments
+        __iReturn = self.__initArguments()
+        if __iReturn: return __iReturn
+        # ... configuration
+        __iReturn = self.__initConfigObj()
+        if __iReturn: return __iReturn
+
+        # Daemonize (?)
+        if self.oArguments.action == 'daemon':
+            return self._daemon()
+
+        # Initialize
+        # ... database connection
+        __iReturn = self.__initDatabaseConnection()
+        if __iReturn: return __iReturn
+
+        # Execute
+        self.bInitOK = True
+        if self.oArguments.action == 'monitor':
+            signal.signal( signal.SIGINT, self.stop )
+            signal.signal( signal.SIGTERM, self.stop )
+            return self._serverMonitor()
+        else:
+            __dAction = { 'list' : self._serverList,
+                          'add' : self._serverAdd,
+                          'remove' : self._serverRemove,
+                          'status' : self._serverStatus }
+            return __dAction[self.oArguments.action]()
+
+
+    def stop( self, signal, frame ):
+        """
+        Exits monitoring process; to be used as signal handler
+        """
+
+        self.bStop = True
+
+# Main
+if __name__ == '__main__':
+    oDovecotLoadBalancer = CDovecotLoadBalancer()
+    sys.exit( oDovecotLoadBalancer.run() )

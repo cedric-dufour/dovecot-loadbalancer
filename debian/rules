@@ -1,0 +1,90 @@
+#!/usr/bin/make -f
+# Sample debian/rules that uses debhelper.
+# GNU copyright 1997 to 1999 by Joey Hess.
+
+# Uncomment this to turn on verbose mode.
+#export DH_VERBOSE=1
+
+DEB_VERSION := $(shell dpkg-parsechangelog | egrep '^Version:' | cut -f 2 -d ' ')
+DEB_NOEPOCH_VERSION := $(shell echo $(DEB_VERSION) | cut -d: -f2-)
+DEB_UPSTREAM_VERSION := $(shell echo $(DEB_NOEPOCH_VERSION) | sed 's/-[^-]*$$//')
+
+DEB_PACKAGE_SOURCE = dovecot-loadbalancer-source
+DEB_PACKAGE = dovecot-loadbalancer
+
+.PHONY: build clean install binary-indep binary-arch binary
+
+build: build-stamp
+
+build-stamp:
+	dh_testdir
+	touch build-stamp
+
+clean:
+	dh_testdir
+	dh_testroot
+	dh_clean build-stamp
+
+install: build
+	dh_testdir
+	dh_testroot
+	dh_prep
+	dh_installdirs
+
+	# Create the Debian packages
+
+	# ... DEB_PACKAGE
+	mkdir -p debian/$(DEB_PACKAGE)/usr/bin
+	cp dovecot-loadbalancer debian/$(DEB_PACKAGE)/usr/bin/.
+	sed -i "s|^\s*DEBUG\s*=.*|DEBUG = False|;s|^\s*CONFIGSPEC_FILENAME\s*=.*|CONFIGSPEC_FILENAME = '/usr/share/$(DEB_PACKAGE)/dovecot-loadbalancer.conf.spec'|" debian/$(DEB_PACKAGE)/usr/bin/dovecot-loadbalancer
+	mkdir -p debian/$(DEB_PACKAGE)/usr/share/$(DEB_PACKAGE)
+	cp dovecot-loadbalancer.conf.spec debian/$(DEB_PACKAGE)/usr/share/$(DEB_PACKAGE)/.
+	mkdir -p debian/$(DEB_PACKAGE)/usr/share/doc/$(DEB_PACKAGE)
+	cp -r dovecot sql COPYRIGHT LICENSE README debian/$(DEB_PACKAGE)/usr/share/doc/$(DEB_PACKAGE)/.
+	mkdir -p debian/$(DEB_PACKAGE)/etc/dovecot
+	cp dovecot-loadbalancer.conf debian/$(DEB_PACKAGE)/etc/dovecot/.
+
+# Build architecture-dependent files here.
+binary-arch: build install
+# We have nothing to do by default.
+
+# Build architecture-independent files here.
+binary-indep: build install
+	dh_testdir
+	dh_testroot
+	dh_installchangelogs 
+	dh_compress
+	dh_fixperms
+	dh_installinit
+	dh_installdeb
+	dh_gencontrol
+	dh_md5sums
+	dh_builddeb
+
+binary: binary-indep binary-arch
+
+build-source-tarball:
+	dh_testdir
+	dh_clean build-stamp
+	# Create the source tarball
+	mkdir -p /tmp/$(DEB_PACKAGE_SOURCE)-$(DEB_UPSTREAM_VERSION)
+	cp -r * /tmp/$(DEB_PACKAGE_SOURCE)-$(DEB_UPSTREAM_VERSION)/.
+	tar -C /tmp -cjf ../$(DEB_PACKAGE_SOURCE)-$(DEB_UPSTREAM_VERSION).tar.bz2 $(DEB_PACKAGE_SOURCE)-$(DEB_UPSTREAM_VERSION)
+	rm -rf /tmp/$(DEB_PACKAGE_SOURCE)-$(DEB_UPSTREAM_VERSION)
+
+build-install-tarball:
+	# Create the installation tarball
+	# WARNING: make install before-hand!
+	mkdir -p /tmp/$(DEB_PACKAGE)-$(DEB_UPSTREAM_VERSION)/
+	cp -rp debian/$(DEB_PACKAGE)/usr debian/$(DEB_PACKAGE)/etc /tmp/$(DEB_PACKAGE)-$(DEB_UPSTREAM_VERSION)/.
+	tar -C /tmp -cjf ../$(DEB_PACKAGE)-$(DEB_UPSTREAM_VERSION).tar.bz2 $(DEB_PACKAGE)-$(DEB_UPSTREAM_VERSION)
+	rm -rf /tmp/$(DEB_PACKAGE)-$(DEB_UPSTREAM_VERSION)
+
+debian-packages:
+	debuild -us -uc -b
+
+debian-source:
+	debuild -I'.git*' -us -uc -S
+
+release: debian-packages build-install-tarball debian-source build-source-tarball
+

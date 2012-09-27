@@ -1,0 +1,15 @@
+Source: dovecot-loadbalancer
+Section: admin
+Priority: optional
+Maintainer: Cedric Dufour <cedric.dufour@ced-network.net>
+Build-Depends: debhelper (>= 5) 
+
+Package: dovecot-loadbalancer
+Architecture: all
+Depends: python (>= 2.6), python-argparse, python-configobj, python-daemon, python-psycopg2
+Suggests: dovecot, postgresql, mail-transport-agent
+Description: Dovecot Load-Balancer (daemon and control utility)
+ This small python script - along with the required PostgreSQL database -
+ allows to define and monitor actual Dovecot servers and provide load-balancing
+ and high-availability for the Dovecot services.
+

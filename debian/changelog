@@ -1,0 +1,5 @@
+dovecot-loadbalancer (1.0.20120927) UNRELEASED; urgency=low
+
+  * New version (see https://github.com/cedric-dufour/dovecot-loadbalancer for changelog)
+
+ -- Cedric Dufour <cedric.dufour@ced-network.net>  Thu, 27 Sep 2012 12:08:56 +0200

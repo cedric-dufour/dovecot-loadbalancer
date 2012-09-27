@@ -1,0 +1,17 @@
+Dovecot Load-Balancer PostgreSQL Installation
+=============================================
+
+Create the PostgreSQL database:
+
+  $ su postgres
+  # createuser -DRSEP dovecot
+  # createdb -O dovecot dovecot
+  # createlang plpgsql dovecot
+  # psql -f table.pgsql dovecot
+  # psql -f function.pgsql dovecot
+  # psql -c 'GRANT SELECT ON tb_DLB_Host TO dovecot' dovecot
+
+Configure the Dovecot Load-Balancer with the matching database connection
+settings:
+
+  [Debian] /etc/dovecot/dovecot-loadbalancer.conf  # Section [database]

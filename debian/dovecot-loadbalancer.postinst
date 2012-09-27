@@ -1,0 +1,17 @@
+#!/bin/sh
+set -e
+
+# Set proper permissions
+chmod o= /etc/dovecot/dovecot-loadbalancer.conf
+
+# Automatically added by dh_installinit
+if [ -x "/etc/init.d/dovecot-loadbalancer" ]; then
+	update-rc.d dovecot-loadbalancer defaults >/dev/null
+	if [ -x "`which invoke-rc.d 2>/dev/null`" ]; then
+		invoke-rc.d dovecot-loadbalancer start || exit $?
+	else
+		/etc/init.d/dovecot-loadbalancer start || exit $?
+	fi
+fi
+# End automatically added section
+

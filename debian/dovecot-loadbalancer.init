@@ -1,0 +1,73 @@
+#! /bin/bash
+### BEGIN INIT INFO
+# Provides:          dovecot-loadbalancer
+# Required-Start:    $remote_fs $syslog $named $network
+# Required-Stop:     $remote_fs $syslog $named $network
+# Should-Start:
+# Should-Stop:
+# Default-Start:     2 3 4 5
+# Default-Stop:      0 1 6
+# Short-Description: Start/Stop the Dovecot Load-Balancer daemon
+### END INIT INFO
+set -e
+
+# Parameters
+EXEC=/usr/bin/dovecot-loadbalancer
+NAME=dovecot-loadbalancer
+DESC='Dovecot Load-Balancer'
+DEFAULT=/etc/default/dovecot-loadbalancer
+CONFIG=/etc/dovecot/dovecot-loadbalancer.conf
+PID=/var/run/dovecot-loadbalancer.pid
+
+# Check runtime environment
+[ ! -x "${EXEC}" ] && echo "ERROR: Missing/invalid executable (${EXEC})" >&2 && exit 1
+[ ! -r "${CONFIG}" ] && echo "ERROR: Missing/invalid configuration file (${CONFIG})" >&2 && exit 1
+
+# Load resources
+. /lib/lsb/init-functions
+
+# Include defaults if available
+DAEMON=no
+[ -f "${DEFAULT}" ] && . /etc/default/dovecot-loadbalancer
+[ "${DAEMON}" != 'yes' ] && echo "INFO: Daemon is disabled (in ${DEFAULT})" && exit 0
+
+# Main
+case "${1}" in
+
+    start)
+	      log_daemon_msg "Starting ${DESC}" "${NAME}"
+        if start-stop-daemon --start --quiet --oknodo --pidfile "${PID}" --exec "${EXEC}" -- daemon -C "${CONFIG}" --pid "${PID}"; then
+            log_end_msg 0
+        else
+            log_end_msg 1
+        fi
+        ;;
+
+    stop)
+	      log_daemon_msg "Stopping ${DESC}" "${NAME}"
+        if start-stop-daemon --stop --quiet --oknodo --pidfile "${PID}"; then
+            log_end_msg 0
+        else
+            log_end_msg 1
+        fi
+        ;;
+
+    restart)
+	      $0 stop
+	      sleep 1
+	      $0 start
+	      ;;
+
+    status)
+        status_of_proc -p "${PID}" "${EXEC}" "${NAME}" && exit 0 || exit $?
+        ;;
+
+    *)
+	      log_failure_msg "USAGE: ${0} {start|stop|restart|status}" 
+	      exit 1
+	      ;;
+
+esac
+
+# Done
+exit 0

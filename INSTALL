@@ -1,0 +1,79 @@
+Dovecot Load-Balancer
+=====================
+
+
+BUILD
+-----
+
+NOTE: By "build", we mean create the necessary tarballs/package required for
+      installation (according to the INSTALL section below) or distribution.
+
+1. [MUST] Obtain the source code:
+
+   BASH: git clone https://github.com/cedric-dufour/dovecot-loadbalancer
+
+   OR
+
+   BASH: tar -xjf dovecot-loadbalancer-source-@version@.tar.bz2
+   BASH: cd dovecot-loadbalancer-source-@version@
+
+2. [MAY] (Re-)build the source tarball:
+
+   BASH: ./debian/rules build-source-tarball
+   BASH: ls -al ../dovecot-loadbalancer-source-@version@.tar.bz2
+
+3. [MAY] Build the installation (release) tarball:
+
+   BASH: ./debian/rules build-install-tarball
+   BASH: ls -al ../dovecot-loadbalancer-@version@.tar.bz2
+
+4. [MAY] Build the debian packages:
+
+   BASH: debuild -us -uc -b
+   BASH: ls -al ../dovecot-loadbalancer_@version@_all.deb ../dovecot-loadbalancer-doc_@version@_all.deb
+
+5. [MAY] Build the debian source package:
+
+   BASH: debuild -I'.git*' -us -uc -S
+   BASH: ls -al ../dovecot-loadbalancer_@version@.dsc ../dovecot-loadbalancer_@version@.tar.gz
+
+OR
+
+2-5. [SHOULD] Do it all with a single command
+
+   BASH: ./debian/rules release
+
+
+INSTALL
+-------
+
+1. [MUST] Installation:
+
+   a. using the release tarball:
+
+      BASH: INSTALL_DIR='<installation-directory>'
+      BASH: cd "${INSTALL_DIR}"
+      BASH: tar -xjf dovecot-loadbalancer-@version@.tar.bz2
+
+   OR
+
+   b. using the debian package:
+
+      BASH: dpkg -i dovecot-loadbalancer_@version@_all.deb
+
+
+CONFIGURE
+---------
+
+1. [MUST] Create the required PostgreSQL database, using the provided SQL code:
+
+   see /usr/share/doc/dovecot-loadbalancer/sql/*
+
+2. [MUST] Configure Dovecot to use the SQL backend for load-balancing:
+
+   see /usr/share/doc/dovecot-loadbalancer/dovecot/*
+
+3. [MUST] Make sure to provide the appropriate settings in the configuration file:
+
+   see /etc/dovecot/dovecot-loadbalancer.conf
+

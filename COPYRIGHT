@@ -1,0 +1,21 @@
+Dovecot Load-Balancer
+Copyright (C) 2012 Cedric Dufour <http://cedric.dufour.name>
+
+The Dovecot Load-Balancer is free software:
+you can redistribute it and/or modify it under the terms of the GNU General
+Public License as published by the Free Software Foundation, Version 3.
+
+The Dovecot Load-Balancer is distributed in the hope that it will be
+useful, but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+
+See the GNU General Public License for more details:
+
+  /usr/share/common-licenses/GPL-3
+
+The Dovecot Load-Balancer includes all resources which contain the
+mention "Dovecot Load-Balancer" in their preamble.
+
+Other resources are (and must be) used according to their original license,
+which is (should be made) available from their respective author.
+

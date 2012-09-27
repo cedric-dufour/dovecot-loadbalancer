@@ -1,0 +1,3 @@
+# Uncomment the following line to allow the Dovecot Load-Balancer
+# to run as a daemon
+#DAEMON=yes

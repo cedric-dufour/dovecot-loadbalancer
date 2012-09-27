@@ -1,0 +1,43 @@
+Dovecot Load-Balancer
+=====================
+
+Synopsis and Features
+---------------------
+
+This small python script - along with the required PostgreSQL database -
+allows to define and monitor actual Dovecot servers and provide load-balancing
+and high-availability for the Dovecot services.
+
+
+Usage
+-----
+
+To list the available/defined servers and their status:
+
+  $ dovecot-loadbalancer list
+
+To add a new server:
+
+  $ dovecot-loadbalancer add -H <hostname/IP-address> -P <port>
+
+To remove an existing server:
+
+  $ dovecot-loadbalancer remove -H <hostname/IP-address> -P <port>
+
+To perform a one-shot status check:
+
+  $ dovecot-loadbalancer status
+  $ dovecot-loadbalancer list
+
+To launch the monitoring (daemon)
+
+  $ dovecot-loadbalancer monitor  # foreground process
+
+  OR
+
+  $ dovecot-loadbalancer daemon   # background process
+
+Further details:
+
+  $ dovecot-loadbalancer --help
+
