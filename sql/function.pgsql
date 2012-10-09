@@ -93,44 +93,46 @@ BEGIN
 END
 $$ LANGUAGE 'plpgsql' STRICT VOLATILE SECURITY DEFINER;
 
-CREATE TYPE fn_DLB_Host_forUser_type AS (
-  password text,
-  nopassword text,
-  host text,
-  port text,
-  destuser text,
-  nologin text,
-  nodelay text,
-  proxy text,
-  ssl text
-);
-
+CREATE OR REPLACE VIEW vw_DLB_Host_forUser AS
+SELECT
+  NULL::varchar AS password,
+  NULL::varchar AS nopassword,
+  vc_IP  AS host,
+  vc_Port AS port,
+  NULL::varchar AS destuser,
+  NULL::varchar AS nologin,
+  NULL::varchar AS nodelay,
+  NULL::varchar AS proxy,
+  NULL::varchar AS ssl
+FROM
+  tb_DLB_Host
+;
+ 
 CREATE OR REPLACE FUNCTION fn_DLB_Host_forUser(
   text
-) RETURNS fn_DLB_Host_forUser_type AS $$
+) RETURNS setof vw_DLB_Host_forUser AS $$
 DECLARE
 -- ARGUMENTS
   A_vc_user ALIAS FOR $1;
 -- VARIABLES
   V_i_Host_count bigint;
   V_i_Host_limit bigint;
-  V_fn_DLB_Host_forUser_type fn_DLB_Host_forUser_type;
 BEGIN
   -- Retrieve active hosts count and corresponding query limit
   SELECT COUNT( pk ) FROM tb_DLB_Host WHERE b_Active INTO V_i_Host_count;
   SELECT CASE WHEN V_i_Host_count > 0 THEN MOD( hex2dec( SUBSTR( MD5( A_vc_User ), 1, 8 ) ), V_i_Host_count )+1 ELSE 0 END INTO V_i_Host_limit;
 
   -- Retrieve host
-  SELECT
-    NULL,
-    'Y', -- AS nopassword,
-    vc_IP, --  AS host,
-    vc_Port, --  AS port,
-    NULL, --  AS destuser,
-    'Y', --  AS nologin,
-    'Y', --  AS nodelay,
-    'Y', --  AS proxy,
-    'any-cert' --  AS ssl
+  RETURN QUERY SELECT
+    NULL::varchar,
+    'Y'::varchar,
+    vc_IP,
+    vc_Port,
+    NULL::varchar,
+    'Y'::varchar,
+    'Y'::varchar,
+    'Y'::varchar,
+    'any-cert'::varchar
   FROM
   (
     SELECT
@@ -143,16 +145,12 @@ BEGIN
       pk ASC
     LIMIT
       V_i_Host_limit
-  ) AS tb_DLB_Host_aux
+  ) AS vw
   ORDER BY
     pk DESC
   LIMIT
     1
-  INTO
-    V_fn_DLB_Host_forUser_type
   ;
-
-  RETURN V_fn_DLB_Host_forUser_type;
 END
 $$ LANGUAGE 'plpgsql' STRICT STABLE SECURITY DEFINER;
 
