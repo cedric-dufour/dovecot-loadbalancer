@@ -36,8 +36,8 @@ import time
 from validate import Validator
 
 # Global objects
-DEBUG = True
-CONFIGSPEC_FILENAME = 'dovecot-loadbalancer.conf.spec'
+DEBUG = False
+CONFIGSPEC_FILENAME = '/usr/share/dovecot-loadbalancer/dovecot-loadbalancer.conf.spec'
 
 # Dovecot Load-Balancer class
 class CDovecotLoadBalancer:
@@ -175,6 +175,8 @@ class CDovecotLoadBalancer:
         __bSuccess = False
 
         # Check server status (by attempting to open a socket connection on its specifing host/port)
+        if DEBUG:
+            sys.stderr.write( 'DEBUG: Checking server; %s\n' % str(_lServer) )
         __lAddress = ( _lServer[0], _lServer[1] )
         __oClientSocket = None
         for __i in range( 0, self.oConfigObj['status']['retry']+1 ):
@@ -192,35 +194,39 @@ class CDovecotLoadBalancer:
             if __bSuccess:
                 sys.stderr.write( 'DEBUG: Server is alive; %s\n' % str(__lAddress) )
             else:
-                sys.stderr.write( 'DEBUG: Failed to create connection to server; %s\n' % str(__lAddress) )
+                sys.stderr.write( 'DEBUG: Server is dead; %s\n' % str(__lAddress) )
 
         # Update server status
-        __oDatabaseCursor = self.oDatabaseConnection.cursor()
-        try:
-            __oDatabaseCursor.execute( 'SELECT fn_DLB_Host_status(%s,%s,%s);', ( str(_lServer[0]), str(_lServer[1]), __bSuccess ) )
-        except Exception, e:
-            sys.stderr.write( 'ERROR: Failed to execute database query; %s\n' % str(e) )
-            return 1
-        if int(__oDatabaseCursor.fetchone()[0]) <= 0:
-            sys.stderr.write( 'ERROR: Failed to update server status in database\n' )
-            return 1
+        if __bSuccess != bool(_lServer[2]):
+            if DEBUG:
+                sys.stderr.write( 'DEBUG: Server switched status; %s: %s -> %s\n' % ( str(__lAddress), _lServer[2], __bSuccess ) )
 
-        # Send e-mail
-        if __bSuccess != bool(_lServer[2]) and len( self.oConfigObj['email']['recipient'] ) > 0:
+            __oDatabaseCursor = self.oDatabaseConnection.cursor()
             try:
-                __sSubject = "Server %s is " % str(__lAddress)
-                __sSubject += 'UP' if __bSuccess else 'DOWN'
-                __sMessage = "Time: %s\n" % time.strftime( '%Y-%m-%d %H:%M:%S' )
-                __sMessage += "Message: %s\n" % __sSubject
-                __oMIMEText = MIMEText( __sMessage )
-                __oMIMEText['From'] = self.oConfigObj['email']['sender']
-                __oMIMEText['To'] = self.oConfigObj['email']['recipient']
-                __oMIMEText['Subject'] = self.oConfigObj['email']['prefix']+__sSubject
-                __oPopen = Popen( [ self.oConfigObj['email']['sendmail'], "-t" ], stdin=PIPE )
-                __oPopen.communicate( __oMIMEText.as_string() )
+                __oDatabaseCursor.execute( 'SELECT fn_DLB_Host_status(%s,%s,%s);', ( str(_lServer[0]), str(_lServer[1]), __bSuccess ) )
             except Exception, e:
-                sys.stderr.write( 'ERROR: Failed to send status message (e-mail); %s\n' % str(e) )
+                sys.stderr.write( 'ERROR: Failed to execute database query; %s\n' % str(e) )
                 return 1
+            if int(__oDatabaseCursor.fetchone()[0]) <= 0:
+                sys.stderr.write( 'ERROR: Failed to update server status in database\n' )
+                return 1
+
+            # Send e-mail
+            if len( self.oConfigObj['email']['recipient'] ) > 0:
+                try:
+                    __sSubject = "Server %s is " % str(__lAddress)
+                    __sSubject += 'UP' if __bSuccess else 'DOWN'
+                    __sMessage = "Time: %s\n" % time.strftime( '%Y-%m-%d %H:%M:%S' )
+                    __sMessage += "Message: %s\n" % __sSubject
+                    __oMIMEText = MIMEText( __sMessage )
+                    __oMIMEText['From'] = self.oConfigObj['email']['sender']
+                    __oMIMEText['To'] = self.oConfigObj['email']['recipient']
+                    __oMIMEText['Subject'] = self.oConfigObj['email']['prefix']+__sSubject
+                    __oPopen = Popen( [ self.oConfigObj['email']['sendmail'], "-t" ], stdin=PIPE )
+                    __oPopen.communicate( __oMIMEText.as_string() )
+                except Exception, e:
+                    sys.stderr.write( 'ERROR: Failed to send status message (e-mail); %s\n' % str(e) )
+                    return 1
 
         return 0
 
@@ -340,16 +346,14 @@ class CDovecotLoadBalancer:
             sys.stderr.write( 'ERROR: Invalid status; missing or failed initialization\n' )
             return 1
 
-        # Retrieve servers list
-        __oServerList = self.__serverList()
-        if __oServerList is None: return 1
-
         # Check hosts status
         # NOTE: status check is achieved using parallel threads; the main process counts as 1 thread
         while not self.bStop:
             while threading.active_count() > 1:
                 sys.stderr.write( "ERROR: Status-check threads are still active; please adjust your 'repeat' setting\n" )
                 time.sleep( (self.oConfigObj['status']['retry']+1) * self.oConfigObj['status']['timeout'] )
+            __oServerList = self.__serverList()
+            if __oServerList is None: return 1
             for __oServer in __oServerList:
                 while threading.active_count() > self.oConfigObj['status']['threads']:
                     time.sleep( 0.1 )
