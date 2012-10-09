@@ -1,3 +1,12 @@
+dovecot-loadbalancer (1.0.20121009) UNRELEASED; urgency=low
+
+  * New version (see https://github.com/cedric-dufour/dovecot-loadbalancer for changelog)
+  - FIX: Dovecot-called SQL function did not return proper types
+  - FIX: Retrieve up-to-date servers list when monitoring
+  - FIX: Increased delay between stop and start actions in init.d script
+
+ -- Cedric Dufour <cedric.dufour@ced-network.net>  Tue, 09 Oct 2012 11:34:48 +0200
+
 dovecot-loadbalancer (1.0.20120927) UNRELEASED; urgency=low
 
   * New version (see https://github.com/cedric-dufour/dovecot-loadbalancer for changelog)
