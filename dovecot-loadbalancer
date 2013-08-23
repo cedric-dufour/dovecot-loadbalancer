@@ -1,6 +1,6 @@
 #!/usr/bin/env python
-# -*- mode:python; tab-width:2; c-basic-offset:2; intent-tabs-mode:nil; -*-
-# ex: filetype=python tabstop=2 softtabstop=2 shiftwidth=2 expandtab autoindent smartindent
+# -*- mode:python; tab-width:4; c-basic-offset:4; intent-tabs-mode:nil; -*-
+# ex: filetype=python tabstop=4 softtabstop=4 shiftwidth=4 expandtab autoindent smartindent
 
 #
 # Dovecot Load-Balancer
@@ -146,26 +146,43 @@ class CDovecotLoadBalancer:
         return 0
 
 
-    def __initDatabaseConnection( self ):
+    def __getDatabaseCursor( self ):
         """
-        Opens the database connection; returns a non-zero exit code in case of failure.
+        Retrieves a cursor object for database querying; returns a None object in case of failure.
         """
 
-        # Open database connection
-        try:
-            __sDatabaseConnectionString = "host='"+self.oConfigObj['database']['host']+"'"
-            __sDatabaseConnectionString += " port="+str(self.oConfigObj['database']['port'])
-            __sDatabaseConnectionString += " dbname='"+self.oConfigObj['database']['database']+"'"
-            __sDatabaseConnectionString += " user='"+self.oConfigObj['database']['user']+"'"
-            __sDatabaseConnectionString += " password='"+self.oConfigObj['database']['password']+"'"
-            self.oDatabaseConnection = psycopg2.connect( __sDatabaseConnectionString )
-        except Exception, e:
-            self.oDatabaseConnection = None
-            sys.stderr.write( 'ERROR: Failed to open database connection; %s\n' % str(e) )
-            return 1
-        self.oDatabaseConnection.set_isolation_level( 0 )
+        # Retrieve database cursor
+        __oDatabaseCursor = None
+        while __oDatabaseCursor is None and not self.bStop:
+            # Open database connection
+            while self.oDatabaseConnection is None and not self.bStop:
+                try:
+                    __sDatabaseConnectionString = "host='"+self.oConfigObj['database']['host']+"'"
+                    __sDatabaseConnectionString += " port="+str(self.oConfigObj['database']['port'])
+                    __sDatabaseConnectionString += " dbname='"+self.oConfigObj['database']['database']+"'"
+                    __sDatabaseConnectionString += " user='"+self.oConfigObj['database']['user']+"'"
+                    __sDatabaseConnectionString += " password='"+self.oConfigObj['database']['password']+"'"
+                    self.oDatabaseConnection = psycopg2.connect( __sDatabaseConnectionString )
+                    self.oDatabaseConnection.set_isolation_level( 0 )
+                except Exception, e:
+                    self.oDatabaseConnection = None
+                    sys.stderr.write( 'ERROR: Failed to open database connection; %s\n' % str(e) )
+                    time.sleep( 3 )
+            if self.bStop: break
+            # Retrieve database cursor
+            try:
+                __oDatabaseCursor = self.oDatabaseConnection.cursor()
+            except Exception, e:
+                __oDatabaseCursor = None
+                sys.stderr.write( 'ERROR: Failed to obtain database object; %s\n' % str(e) )
+                try:
+                    self.oDatabaseConnection.close()
+                except Exception, e:
+                    pass
+                self.oDatabaseConnection = None
+                time.sleep( 3 )
 
-        return 0
+        return __oDatabaseCursor
 
 
     def __checkServer( self, _lServer ):
@@ -201,15 +218,13 @@ class CDovecotLoadBalancer:
             if DEBUG:
                 sys.stderr.write( 'DEBUG: Server switched status; %s: %s -> %s\n' % ( str(__lAddress), _lServer[2], __bSuccess ) )
 
-            __oDatabaseCursor = self.oDatabaseConnection.cursor()
+            __oDatabaseCursor = self.__getDatabaseCursor()
             try:
                 __oDatabaseCursor.execute( 'SELECT fn_DLB_Host_status(%s,%s,%s);', ( str(_lServer[0]), str(_lServer[1]), __bSuccess ) )
+                if int(__oDatabaseCursor.fetchone()[0]) <= 0:
+                    sys.stderr.write( 'ERROR: Failed to update server status in database\n' )
             except Exception, e:
                 sys.stderr.write( 'ERROR: Failed to execute database query; %s\n' % str(e) )
-                return 1
-            if int(__oDatabaseCursor.fetchone()[0]) <= 0:
-                sys.stderr.write( 'ERROR: Failed to update server status in database\n' )
-                return 1
 
             # Send e-mail
             if len( self.oConfigObj['email']['recipient'] ) > 0:
@@ -226,7 +241,6 @@ class CDovecotLoadBalancer:
                     __oPopen.communicate( __oMIMEText.as_string() )
                 except Exception, e:
                     sys.stderr.write( 'ERROR: Failed to send status message (e-mail); %s\n' % str(e) )
-                    return 1
 
         return 0
 
@@ -237,7 +251,7 @@ class CDovecotLoadBalancer:
         """
 
         # Query database
-        __oDatabaseCursor = self.oDatabaseConnection.cursor()
+        __oDatabaseCursor = self.__getDatabaseCursor()
         try:
             __oDatabaseCursor.execute( 'SELECT vc_IP, vc_Port, b_Active FROM tb_DLB_Host;' )
         except Exception, e:
@@ -286,14 +300,14 @@ class CDovecotLoadBalancer:
             return 1
 
         # Add host
-        __oDatabaseCursor = self.oDatabaseConnection.cursor()
+        __oDatabaseCursor = self.__getDatabaseCursor()
         try:
             __oDatabaseCursor.execute( "SELECT fn_DLB_Host_add(%s,%s);", ( str(self.oArguments.host), str(self.oArguments.port) ) )
+            if int(__oDatabaseCursor.fetchone()[0]) <= 0:
+                sys.stderr.write( 'ERROR: Failed to add host/port to database\n' )
+                return 1
         except Exception, e:
             sys.stderr.write( 'ERROR: Failed to execute database query; %s\n' % str(e) )
-            return 1
-        if int(__oDatabaseCursor.fetchone()[0]) <= 0:
-            sys.stderr.write( 'ERROR: Failed to add host/port to database\n' )
             return 1
 
         return 0
@@ -318,7 +332,7 @@ class CDovecotLoadBalancer:
             return 1
 
         # Remove host
-        __oDatabaseCursor = self.oDatabaseConnection.cursor()
+        __oDatabaseCursor = self.__getDatabaseCursor()
         try:
             __oDatabaseCursor.execute( "SELECT fn_DLB_Host_remove(%s,%s);", ( str(self.oArguments.host), str(self.oArguments.port) ) )
         except Exception, e:
@@ -326,7 +340,6 @@ class CDovecotLoadBalancer:
             return 1
 
         return 0
-
 
 
     def _serverStatus( self ):
@@ -349,11 +362,12 @@ class CDovecotLoadBalancer:
         # Check hosts status
         # NOTE: status check is achieved using parallel threads; the main process counts as 1 thread
         while not self.bStop:
-            while threading.active_count() > 1:
+            while threading.active_count() > 1 and not self.bStop:
                 sys.stderr.write( "ERROR: Status-check threads are still active; please adjust your 'repeat' setting\n" )
                 time.sleep( (self.oConfigObj['status']['retry']+1) * self.oConfigObj['status']['timeout'] )
+            if self.bStop: break
             __oServerList = self.__serverList()
-            if __oServerList is None: return 1
+            if __oServerList is None: continue
             for __oServer in __oServerList:
                 while threading.active_count() > self.oConfigObj['status']['threads']:
                     time.sleep( 0.1 )
@@ -386,12 +400,6 @@ class CDovecotLoadBalancer:
             __oDaemonContext.open()
             emit_message( '[%s]' % os.getpid() )
 
-            # Initialize
-            # NOTE: daemonization requires that database connections be open *after* opening the daemon context
-            # ... database connection
-            __iReturn = self.__initDatabaseConnection()
-            if __iReturn: return __iReturn
-
             # Execute
             self.bInitOK = True
             return self._serverMonitor()
@@ -417,23 +425,16 @@ class CDovecotLoadBalancer:
         if self.oArguments.action == 'daemon':
             return self._daemon()
 
-        # Initialize
-        # ... database connection
-        __iReturn = self.__initDatabaseConnection()
-        if __iReturn: return __iReturn
-
         # Execute
         self.bInitOK = True
-        if self.oArguments.action == 'monitor':
-            signal.signal( signal.SIGINT, self.stop )
-            signal.signal( signal.SIGTERM, self.stop )
-            return self._serverMonitor()
-        else:
-            __dAction = { 'list' : self._serverList,
-                          'add' : self._serverAdd,
-                          'remove' : self._serverRemove,
-                          'status' : self._serverStatus }
-            return __dAction[self.oArguments.action]()
+        signal.signal( signal.SIGINT, self.stop )
+        signal.signal( signal.SIGTERM, self.stop )
+        __dAction = { 'list' : self._serverList,
+                      'add' : self._serverAdd,
+                      'remove' : self._serverRemove,
+                      'status' : self._serverStatus,
+                      'monitor' : self._serverMonitor }
+        return __dAction[self.oArguments.action]()
 
 
     def stop( self, signal, frame ):
@@ -441,6 +442,7 @@ class CDovecotLoadBalancer:
         Exits monitoring process; to be used as signal handler
         """
 
+        sys.stderr.write( 'INFO: Signal caught; cleaning up...\n' )
         self.bStop = True
 
 # Main
