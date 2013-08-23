@@ -1,3 +1,10 @@
+dovecot-loadbalancer (1.0.20130823) UNRELEASED; urgency=low
+
+  * New version (see https://github.com/cedric-dufour/dovecot-loadbalancer for changelog)
+  - FIX: Daemon would bail out on database connection/querying problem
+
+ -- Cedric Dufour <cedric.dufour@ced-network.net>  Fri, 23 Aug 2013 12:44:30 +0200
+
 dovecot-loadbalancer (1.0.20121009) UNRELEASED; urgency=low
 
   * New version (see https://github.com/cedric-dufour/dovecot-loadbalancer for changelog)
