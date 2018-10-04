@@ -2,7 +2,7 @@
 
 /*
  * Dovecot Load-Balancer
- * Copyright (C) 2012 Cedric Dufour <http://cedric.dufour.name>
+ * Copyright (C) 2012-2018 Cedric Dufour <http://cedric.dufour.name>
  * Author: Cedric Dufour <http://cedric.dufour.name>
  *
  * The Dovecot Load-Balancer is free software:
