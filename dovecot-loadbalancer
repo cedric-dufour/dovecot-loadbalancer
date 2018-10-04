@@ -1,10 +1,10 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 # -*- mode:python; tab-width:4; c-basic-offset:4; intent-tabs-mode:nil; -*-
 # ex: filetype=python tabstop=4 softtabstop=4 shiftwidth=4 expandtab autoindent smartindent
 
 #
 # Dovecot Load-Balancer
-# Copyright (C) 2012 Cedric Dufour <http://cedric.dufour.name>
+# Copyright (C) 2012-2018 Cedric Dufour <http://cedric.dufour.name>
 # Author: Cedric Dufour <http://cedric.dufour.name>
 #
 # The Dovecot Load-Balancer is free software:
@@ -19,7 +19,7 @@
 #
 
 # Modules
-# ... deb: python-argparse, python-configobj, python-daemon, python-psycopg2
+# ... deb: python3-configobj, python3-daemon, python3-psycopg2
 import argparse
 from configobj import ConfigObj, ConfigObjError, flatten_errors
 import daemon
@@ -36,8 +36,8 @@ import time
 from validate import Validator
 
 # Global objects
-DEBUG = False
-CONFIGSPEC_FILENAME = '/usr/share/dovecot-loadbalancer/dovecot-loadbalancer.conf.spec'
+VERSION = '%{VERSION}'
+CONFIGSPEC = 'dovecot-loadbalancer.conf.spec'
 
 # Dovecot Load-Balancer class
 class CDovecotLoadBalancer:
@@ -50,6 +50,7 @@ class CDovecotLoadBalancer:
     #------------------------------------------------------------------------------
 
     def __init__( self ):
+        self.bDebug = False
         self.bStop = False
         self.bInitOK = False
         self.oArgumentParser = None
@@ -101,6 +102,15 @@ class CDovecotLoadBalancer:
                                            metavar='<pid-file>',
                                            help='Path to daemon PID file (default:/var/run/dovecot-loadbalancer.pid)' )
 
+        # ... debug
+        self.oArgumentParser.add_argument( '-d', '--debug', action='store_true',
+                                           default=False,
+                                           help='Enable debugging messages' )
+
+        # ... version
+        self.oArgumentParser.add_argument( '-v', '--version', action='version',
+                                           version=('dovecot-loadbalancer - %s - Cedric Dufour <http://cedric.dufour.name>\n' % VERSION) )
+
 
     def __initArguments( self, _aArguments = None ):
         """
@@ -111,7 +121,7 @@ class CDovecotLoadBalancer:
         if _aArguments is None: _aArguments = sys.argv
         try:
             self.oArguments = self.oArgumentParser.parse_args()
-        except Exception, e:
+        except Exception as e:
             self.oArguments = None
             sys.stderr.write( 'ERROR: Failed to parse arguments; %s\n' % str(e) )
             return 1
@@ -126,8 +136,8 @@ class CDovecotLoadBalancer:
 
         # Load configuration settings
         try:
-            self.oConfigObj = ConfigObj( self.oArguments.config, configspec=CONFIGSPEC_FILENAME, file_error=True )
-        except Exception, e:
+            self.oConfigObj = ConfigObj( self.oArguments.config, configspec=CONFIGSPEC, file_error=True )
+        except Exception as e:
             self.oConfigObj = None
             sys.stderr.write( 'ERROR: Failed to load configuration from file; %s\n' % str(e) )
             return 1
@@ -164,7 +174,7 @@ class CDovecotLoadBalancer:
                     __sDatabaseConnectionString += " password='"+self.oConfigObj['database']['password']+"'"
                     self.oDatabaseConnection = psycopg2.connect( __sDatabaseConnectionString )
                     self.oDatabaseConnection.set_isolation_level( 0 )
-                except Exception, e:
+                except Exception as e:
                     self.oDatabaseConnection = None
                     sys.stderr.write( 'ERROR: Failed to open database connection; %s\n' % str(e) )
                     time.sleep( 3 )
@@ -172,12 +182,12 @@ class CDovecotLoadBalancer:
             # Retrieve database cursor
             try:
                 __oDatabaseCursor = self.oDatabaseConnection.cursor()
-            except Exception, e:
+            except Exception as e:
                 __oDatabaseCursor = None
                 sys.stderr.write( 'ERROR: Failed to obtain database object; %s\n' % str(e) )
                 try:
                     self.oDatabaseConnection.close()
-                except Exception, e:
+                except Exception as e:
                     pass
                 self.oDatabaseConnection = None
                 time.sleep( 3 )
@@ -192,7 +202,7 @@ class CDovecotLoadBalancer:
         __bSuccess = False
 
         # Check server status (by attempting to open a socket connection on its specifing host/port)
-        if DEBUG:
+        if self.bDebug:
             sys.stderr.write( 'DEBUG: Checking server; %s\n' % str(_lServer) )
         __lAddress = ( _lServer[0], _lServer[1] )
         __oClientSocket = None
@@ -207,7 +217,7 @@ class CDovecotLoadBalancer:
             __oClientSocket.close()
 
         # DEBUG
-        if DEBUG:
+        if self.bDebug:
             if __bSuccess:
                 sys.stderr.write( 'DEBUG: Server is alive; %s\n' % str(__lAddress) )
             else:
@@ -215,7 +225,7 @@ class CDovecotLoadBalancer:
 
         # Update server status
         if __bSuccess != bool(_lServer[2]):
-            if DEBUG:
+            if self.bDebug:
                 sys.stderr.write( 'DEBUG: Server switched status; %s: %s -> %s\n' % ( str(__lAddress), _lServer[2], __bSuccess ) )
 
             __oDatabaseCursor = self.__getDatabaseCursor()
@@ -223,7 +233,7 @@ class CDovecotLoadBalancer:
                 __oDatabaseCursor.execute( 'SELECT fn_DLB_Host_status(%s,%s,%s);', ( str(_lServer[0]), str(_lServer[1]), __bSuccess ) )
                 if int(__oDatabaseCursor.fetchone()[0]) <= 0:
                     sys.stderr.write( 'ERROR: Failed to update server status in database\n' )
-            except Exception, e:
+            except Exception as e:
                 sys.stderr.write( 'ERROR: Failed to execute database query; %s\n' % str(e) )
 
             # Send e-mail
@@ -233,13 +243,13 @@ class CDovecotLoadBalancer:
                     __sSubject += 'UP' if __bSuccess else 'DOWN'
                     __sMessage = "Time: %s\n" % time.strftime( '%Y-%m-%d %H:%M:%S' )
                     __sMessage += "Message: %s\n" % __sSubject
-                    __oMIMEText = MIMEText( __sMessage )
+                    __oMIMEText = MIMEText( __sMessage, 'plain' )
                     __oMIMEText['From'] = self.oConfigObj['email']['sender']
                     __oMIMEText['To'] = self.oConfigObj['email']['recipient']
                     __oMIMEText['Subject'] = self.oConfigObj['email']['prefix']+__sSubject
                     __oPopen = Popen( [ self.oConfigObj['email']['sendmail'], "-t" ], stdin=PIPE )
-                    __oPopen.communicate( __oMIMEText.as_string() )
-                except Exception, e:
+                    __oPopen.communicate( __oMIMEText.as_string().encode(sys.stdin.encoding) )
+                except Exception as e:
                     sys.stderr.write( 'ERROR: Failed to send status message (e-mail); %s\n' % str(e) )
 
         return 0
@@ -254,7 +264,7 @@ class CDovecotLoadBalancer:
         __oDatabaseCursor = self.__getDatabaseCursor()
         try:
             __oDatabaseCursor.execute( 'SELECT vc_IP, vc_Port, b_Active FROM tb_DLB_Host;' )
-        except Exception, e:
+        except Exception as e:
             sys.stderr.write( 'ERROR: Failed to query database; %s\n' % str(e) )
             return None
         __oDatabaseResultset = __oDatabaseCursor.fetchall()
@@ -306,7 +316,7 @@ class CDovecotLoadBalancer:
             if int(__oDatabaseCursor.fetchone()[0]) <= 0:
                 sys.stderr.write( 'ERROR: Failed to add host/port to database\n' )
                 return 1
-        except Exception, e:
+        except Exception as e:
             sys.stderr.write( 'ERROR: Failed to execute database query; %s\n' % str(e) )
             return 1
 
@@ -335,7 +345,7 @@ class CDovecotLoadBalancer:
         __oDatabaseCursor = self.__getDatabaseCursor()
         try:
             __oDatabaseCursor.execute( "SELECT fn_DLB_Host_remove(%s,%s);", ( str(self.oArguments.host), str(self.oArguments.port) ) )
-        except Exception, e:
+        except Exception as e:
             sys.stderr.write( 'ERROR: Failed to execute database query; %s\n' % str(e) )
             return 1
 
@@ -403,7 +413,7 @@ class CDovecotLoadBalancer:
             # Execute
             self.bInitOK = True
             return self._serverMonitor()
-        except Exception, e:
+        except Exception as e:
             sys.stderr.write( 'ERROR: Failed to daemonize the monitoring process; %s\n' % str(e) )
             return 1
 
@@ -421,6 +431,9 @@ class CDovecotLoadBalancer:
         __iReturn = self.__initConfigObj()
         if __iReturn: return __iReturn
 
+        # Options
+        self.bDebug = self.oArguments.debug
+        
         # Daemonize (?)
         if self.oArguments.action == 'daemon':
             return self._daemon()
