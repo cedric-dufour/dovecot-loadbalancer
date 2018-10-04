@@ -34,7 +34,7 @@ NOTE: By "build", we mean create the necessary tarballs/package required for
 
 5. [MAY] Build the debian source package:
 
-   BASH: debuild -I'.git*' -us -uc -S
+   BASH: debuild -I'.git*' -I'*.pyc' -us -uc -S
    BASH: ls -al ../dovecot-loadbalancer_@version@.dsc ../dovecot-loadbalancer_@version@.tar.gz
 
 OR

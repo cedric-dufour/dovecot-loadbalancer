@@ -1,3 +1,4 @@
 # Uncomment the following line to allow the Dovecot Load-Balancer
 # to run as a daemon
+# WARNING: Ignored by systemd! Use 'systemctl {disable|enable} dovecot-loadbalancer'
 #DAEMON=yes

@@ -1,90 +1,72 @@
 #!/usr/bin/make -f
-# Sample debian/rules that uses debhelper.
-# GNU copyright 1997 to 1999 by Joey Hess.
 
-# Uncomment this to turn on verbose mode.
 #export DH_VERBOSE=1
+export PACKAGE = dovecot-loadbalancer
+export VERSION := $(shell dpkg-parsechangelog | egrep '^Version:' | cut -f 2 -d ' ')
 
-DEB_VERSION := $(shell dpkg-parsechangelog | egrep '^Version:' | cut -f 2 -d ' ')
-DEB_NOEPOCH_VERSION := $(shell echo $(DEB_VERSION) | cut -d: -f2-)
-DEB_UPSTREAM_VERSION := $(shell echo $(DEB_NOEPOCH_VERSION) | sed 's/-[^-]*$$//')
+# Let's keep our source tree clean
+export PYTHONDONTWRITEBYTECODE=1
 
-DEB_PACKAGE_SOURCE = dovecot-loadbalancer-source
-DEB_PACKAGE = dovecot-loadbalancer
+# Required for 'help2man'
+export PATH:=.:${PATH}
 
-.PHONY: build clean install binary-indep binary-arch binary
+%:
+	dh $@ --with python3,systemd --buildsystem=pybuild
 
-build: build-stamp
+override_dh_install:
+	# Fix global variables
+	sed -i "s|VERSION\s*=.*|VERSION = '$(VERSION)'|;s|CONFIGSPEC\s*=.*|CONFIGSPEC = '/usr/share/$(PACKAGE)/dovecot-loadbalancer.conf.spec'|" debian/$(PACKAGE)/usr/bin/dovecot-loadbalancer
 
-build-stamp:
-	dh_testdir
-	touch build-stamp
+	# Install additional stuff
+	#mkdir -p debian/$(PACKAGE)/usr/bin
+	#cp dovecot-loadbalancer debian/$(PACKAGE)/usr/bin/.
+	mkdir -p debian/$(PACKAGE)/usr/share/$(PACKAGE)
+	cp dovecot-loadbalancer.conf.spec debian/$(PACKAGE)/usr/share/$(PACKAGE)/.
+	mkdir -p debian/$(PACKAGE)/etc/dovecot
+	cp dovecot-loadbalancer.conf debian/$(PACKAGE)/etc/dovecot/dovecot-loadbalancer.conf
+	chmod o= debian/$(PACKAGE)/etc/dovecot/dovecot-loadbalancer.conf
 
-clean:
-	dh_testdir
-	dh_testroot
-	dh_clean build-stamp
+	# Create man pages
+	mkdir -p debian/$(PACKAGE)/usr/share/man/man1
+	help2man \
+		--name 'Log Watcher Daemon (dovecot-loadbalancer)' \
+		--help-option '--help' --version-string $(VERSION) --no-discard-stderr --no-info \
+		dovecot-loadbalancer | fgrep -v 'invalid option' > debian/$(PACKAGE)/usr/share/man/man1/dovecot-loadbalancer.1
 
-install: build
-	dh_testdir
-	dh_testroot
-	dh_prep
-	dh_installdirs
+	# Install
+	dh_install
 
-	# Create the Debian packages
+override_dh_installdocs:
+	dh_installdocs README dovecot sql
 
-	# ... DEB_PACKAGE
-	mkdir -p debian/$(DEB_PACKAGE)/usr/bin
-	cp dovecot-loadbalancer debian/$(DEB_PACKAGE)/usr/bin/.
-	sed -i "s|^\s*DEBUG\s*=.*|DEBUG = False|;s|^\s*CONFIGSPEC_FILENAME\s*=.*|CONFIGSPEC_FILENAME = '/usr/share/$(DEB_PACKAGE)/dovecot-loadbalancer.conf.spec'|" debian/$(DEB_PACKAGE)/usr/bin/dovecot-loadbalancer
-	mkdir -p debian/$(DEB_PACKAGE)/usr/share/$(DEB_PACKAGE)
-	cp dovecot-loadbalancer.conf.spec debian/$(DEB_PACKAGE)/usr/share/$(DEB_PACKAGE)/.
-	mkdir -p debian/$(DEB_PACKAGE)/usr/share/doc/$(DEB_PACKAGE)
-	cp -r dovecot sql COPYRIGHT LICENSE README debian/$(DEB_PACKAGE)/usr/share/doc/$(DEB_PACKAGE)/.
-	mkdir -p debian/$(DEB_PACKAGE)/etc/dovecot
-	cp dovecot-loadbalancer.conf debian/$(DEB_PACKAGE)/etc/dovecot/.
-
-# Build architecture-dependent files here.
-binary-arch: build install
-# We have nothing to do by default.
-
-# Build architecture-independent files here.
-binary-indep: build install
-	dh_testdir
-	dh_testroot
-	dh_installchangelogs 
-	dh_compress
-	dh_fixperms
-	dh_installinit
-	dh_installdeb
-	dh_gencontrol
-	dh_md5sums
-	dh_builddeb
-
-binary: binary-indep binary-arch
+override_dh_clean:
+	dh_clean
+	rm -rf MANIFEST build dist
+	find . -name '*.pyc' -delete
+	find . -type d -name '__pycache__' -exec rmdir {} \;
 
 build-source-tarball:
 	dh_testdir
 	dh_clean build-stamp
 	# Create the source tarball
-	mkdir -p /tmp/$(DEB_PACKAGE_SOURCE)-$(DEB_UPSTREAM_VERSION)
-	cp -r * /tmp/$(DEB_PACKAGE_SOURCE)-$(DEB_UPSTREAM_VERSION)/.
-	tar -C /tmp -cjf ../$(DEB_PACKAGE_SOURCE)-$(DEB_UPSTREAM_VERSION).tar.bz2 $(DEB_PACKAGE_SOURCE)-$(DEB_UPSTREAM_VERSION)
-	rm -rf /tmp/$(DEB_PACKAGE_SOURCE)-$(DEB_UPSTREAM_VERSION)
+	mkdir -p /tmp/$(PACKAGE)-source-$(VERSION)
+	cp -r * /tmp/$(PACKAGE)-source-$(VERSION)/.
+	tar -C /tmp -cjf ../$(PACKAGE)-source-$(VERSION).tar.bz2 $(PACKAGE)-source-$(VERSION)
+	rm -rf /tmp/$(PACKAGE)-source-$(VERSION)
 
 build-install-tarball:
 	# Create the installation tarball
 	# WARNING: make install before-hand!
-	mkdir -p /tmp/$(DEB_PACKAGE)-$(DEB_UPSTREAM_VERSION)/
-	cp -rp debian/$(DEB_PACKAGE)/usr debian/$(DEB_PACKAGE)/etc /tmp/$(DEB_PACKAGE)-$(DEB_UPSTREAM_VERSION)/.
-	tar -C /tmp -cjf ../$(DEB_PACKAGE)-$(DEB_UPSTREAM_VERSION).tar.bz2 $(DEB_PACKAGE)-$(DEB_UPSTREAM_VERSION)
-	rm -rf /tmp/$(DEB_PACKAGE)-$(DEB_UPSTREAM_VERSION)
+	mkdir -p /tmp/$(PACKAGE)-$(VERSION)/
+	cp -rp debian/tmp/usr debian/tmp/etc /tmp/$(PACKAGE)-$(VERSION)/.
+	tar -C /tmp -cjf ../$(PACKAGE)-$(VERSION).tar.bz2 $(PACKAGE)-$(VERSION)
+	rm -rf /tmp/$(PACKAGE)-$(VERSION)
 
 debian-packages:
 	debuild -us -uc -b
 
 debian-source:
-	debuild -I'.git*' -us -uc -S
+	debuild -I'.git*' -I'*.pyc' -us -uc -S
 
-release: debian-packages build-install-tarball debian-source build-source-tarball
+release: debian-packages build-install-tarball debian-source build-source-tarball ;
 
