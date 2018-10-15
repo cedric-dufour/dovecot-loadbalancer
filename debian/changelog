@@ -1,3 +1,9 @@
+dovecot-loadbalancer (3.0.20181015a) UNRELEASED; urgency=low
+
+  - FIX: Debian installer permissions and init/service files
+
+ -- Cédric Dufour <cedric.dufour@ced-network.net>  Mon, 15 Oct 2018 12:18:48 +0200
+
 dovecot-loadbalancer (3.0.20181003a) UNRELEASED; urgency=low
 
   * New release, for Python 3.x
