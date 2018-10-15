@@ -29,13 +29,13 @@ PID=/var/run/dovecot-loadbalancer.pid
 # Include defaults if available
 DAEMON=no
 [ -f "${DEFAULT}" ] && . /etc/default/dovecot-loadbalancer
-[ "${DAEMON}" != 'yes' ] && echo "INFO: Daemon is disabled (in ${DEFAULT})" && exit 0
 
 # Main
 case "${1}" in
 
     start)
-	      log_daemon_msg "Starting ${DESC}" "${NAME}"
+        [ "${DAEMON}" != 'yes' ] && echo "INFO: Daemon is disabled (in ${DEFAULT})" && exit 0
+        log_daemon_msg "Starting ${DESC}" "${NAME}"
         if start-stop-daemon --start --quiet --oknodo --pidfile "${PID}" --exec "${EXEC}" -- daemon -C "${CONFIG}" --pid "${PID}"; then
             log_end_msg 0
         else
@@ -44,7 +44,7 @@ case "${1}" in
         ;;
 
     stop)
-	      log_daemon_msg "Stopping ${DESC}" "${NAME}"
+        log_daemon_msg "Stopping ${DESC}" "${NAME}"
         if start-stop-daemon --stop --quiet --oknodo --pidfile "${PID}"; then
             log_end_msg 0
         else
@@ -53,19 +53,19 @@ case "${1}" in
         ;;
 
     restart)
-	      $0 stop
-	      sleep 10
-	      $0 start
-	      ;;
+        $0 stop
+        sleep 10
+        $0 start
+        ;;
 
     status)
         status_of_proc -p "${PID}" "${EXEC}" "${NAME}" && exit 0 || exit $?
         ;;
 
     *)
-	      log_failure_msg "USAGE: ${0} {start|stop|restart|status}" 
-	      exit 1
-	      ;;
+        log_failure_msg "USAGE: ${0} {start|stop|restart|status}"
+        exit 1
+        ;;
 
 esac
 
